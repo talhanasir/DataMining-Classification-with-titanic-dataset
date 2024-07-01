@@ -1,0 +1,118 @@
+ssh mtalh2@cscluster.uis.edu
+
+hadoop fs -put /home/data/CSC533DM/titanic.csv
+/user/data/CSC533DM/
+
+head /home/data/CSC533DM/titanic.csv
+PassengerId,Survived,Pclass,Name,Gender,Age,SibSp,Parch,Ticket,Fare,Cabin,Embarked
+1,0,3,"Braund, Mr. Owen Harris",male,22,1,0,A/5 21171,7.25,,S
+2,1,1,"Cumings, Mrs. John Bradley (Florence Briggs Thayer)",female,38,1,0,PC
+17599,71.2833,C85,C
+
+pyspark
+
+raw_df = spark.read.option("header", "true").option("inferSchema","true").csv("/user/data/CSC533DM/titanic.csv")
+
+raw_df.show(2)
+
+raw_df = spark.read.csv("/user/data/CSC533DM/titanic.csv", header=True,inferSchema=True)
+
+raw_df.show(2)
+
+raw_df.count()
+raw_df.show(2, truncate=False)
+
+filtered_df = raw_df.select(['Survived', 'Pclass', 'Gender', 'Age', 'SibSp','Parch', 'Fare'])
+
+filtered_df.show(2)
+filtered_df.show(10)
+
+
+
+
+from pyspark.ml.feature import Imputer
+
+imputer = Imputer(strategy='mean', inputCols=['Age'], outputCols=['ImputedAge'])
+
+imputed_df = imputer.fit(filtered_df).transform(filtered_df)
+
+imputed_df.show()
+
+
+from pyspark.ml.feature import StringIndexer
+
+indexer = StringIndexer(inputCol="Gender", outputCol="IndexedGender")
+
+indexed_df = indexer.fit(imputed_df).transform(imputed_df)
+
+indexed_df.show()
+
+
+
+
+from pyspark.ml.feature import VectorAssembler
+
+assembler = VectorAssembler(inputCols=['Pclass', 'SibSp', 'Parch', 'Fare','ImputedAge', 'IndexedGender'], outputCol='features')
+
+features_df = assembler.transform(indexed_df)
+
+features_df.select(['Survived', 'features']).show(10)
+
+
+
+
+from pyspark.sql.functions import rand
+
+train_data, test_data = features_df.randomSplit([0.8, 0.2], seed=42)
+
+print("Number of rows in train_data:", train_data.count())
+
+print("Number of rows in test_data:", test_data.count())
+
+random_data = features_df.orderBy(rand())
+
+train_data, test_data = features_df.randomSplit([0.8, 0.2], seed=42)
+train_data, test_data = random_data.randomSplit([0.8, 0.2], seed=42)
+
+print("Number of rows in train_data:", train_data.count())
+
+print("Number of rows in test_data:", test_data.count())
+
+
+
+
+from pyspark.ml.classification import RandomForestClassifier
+from pyspark.ml.feature import VectorAssembler
+
+classifier = RandomForestClassifier(featuresCol="features", labelCol="Survived")
+
+modelRF = classifier.fit(train_data)
+
+print(modelRF)
+
+print(modelRF.featureImportances)
+
+
+
+
+predictions_df = modelRF.transform(test_data)
+
+predictions_df.show(5)
+
+predictions_df.select(['Survived','features','probability','prediction']).show(5)
+
+
+
+
+from pyspark.ml.evaluation import BinaryClassificationEvaluator
+
+evaluator_roc = BinaryClassificationEvaluator(labelCol="Survived", metricName="areaUnderROC")
+evaluator_pr = BinaryClassificationEvaluator(labelCol="Survived", metricName="areaUnderPR")
+
+test_predictions = modelRF.transform(test_data)
+
+roc = evaluator_roc.evaluate(test_predictions)
+pr = evaluator_pr.evaluate(test_predictions)
+
+print("Area Under ROC curve:", roc)
+print("Area Under Precision-Recall curve:", pr)
